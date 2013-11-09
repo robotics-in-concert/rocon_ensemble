@@ -1,0 +1,5 @@
+# Request deleting annotations associated to the map identified by map_uuid.
+
+# Unique ID of the associated map.
+string map_uuid
+---

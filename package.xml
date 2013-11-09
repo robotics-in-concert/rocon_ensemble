@@ -1,6 +1,6 @@
 <package>
   <name>annotations_store</name>
-  <version>0.3.1</version>
+  <version>0.1.0</version>
   <description>
     Storage manager for OccupancyGrid maps.  Supports naming the most
     recent map, getting a list of map names, and publishing a

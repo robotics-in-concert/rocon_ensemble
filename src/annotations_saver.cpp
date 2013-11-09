@@ -41,7 +41,7 @@ service calls:
 #include <ros/ros.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/GetMap.h>
-#include <annotations_store/SaveMap.h>
+#include <map_store/SaveMap.h>
 
 #include <string>
 #include <sstream>
@@ -76,8 +76,8 @@ void onMapReceived(const nav_msgs::OccupancyGrid::ConstPtr& map_msg)
   ROS_DEBUG("saved map");
 }
 
-bool saveMap(annotations_store::SaveMap::Request &req,
-             annotations_store::SaveMap::Response &res)
+bool saveMap(map_store::SaveMap::Request &req,
+             map_store::SaveMap::Response &res)
 {
   nav_msgs::GetMap srv;
   if (!dynamic_map_service_client.call(srv)) {

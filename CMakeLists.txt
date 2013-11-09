@@ -9,6 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   rostest
   warehouse_ros
   ar_track_alvar
+  yocs_msgs
 )
 
 add_message_files(
@@ -19,11 +20,11 @@ add_message_files(
 add_service_files(
   DIRECTORY srv
   FILES
-  DeleteMap.srv
-  ListMaps.srv
-  PublishMap.srv
-  RenameMap.srv
-  SaveMap.srv
+  DeleteAnnotations.srv
+  ListAnnotations.srv
+  PublishAnnotations.srv
+  RenameAnnotations.srv
+  SaveAnnotations.srv
 )
 generate_messages()
 
