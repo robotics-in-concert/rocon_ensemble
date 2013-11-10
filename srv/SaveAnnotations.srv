@@ -12,5 +12,5 @@ string map_uuid
 # not sure if it's somehow useful
 string session_id
 ---
-# What went wrong, if something
+# What went wrong, if anything
 string error_msg

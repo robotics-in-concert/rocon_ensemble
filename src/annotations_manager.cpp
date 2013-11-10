@@ -50,6 +50,7 @@ service calls:
 
 #include <mongo_ros/message_collection.h>
 #include <ros/ros.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <annotations_store/ListAnnotations.h>
 #include <annotations_store/PublishAnnotations.h>
 #include <annotations_store/DeleteAnnotations.h>
@@ -75,8 +76,12 @@ ros::Publisher markers_pub;
 ros::Publisher tables_pub;
 ros::Publisher columns_pub;
 ros::Publisher walls_pub;
+ros::Publisher visuals_pub;
 
 std::string last_map;
+std::string pub_map_id;
+
+visualization_msgs::MarkerArray visuals_array;
 
 ar_msgs::AlvarMarkers markers_msg;
 yocs_msgs::ColumnList columns_msg;
@@ -109,55 +114,51 @@ void onTablesReceived(const yocs_msgs::TableList::ConstPtr& msg)
   tables_msg = *msg;
 }
 
+void clearVisuals()
+{
+  for (int i = 0; i < visuals_array.markers.size(); ++i)
+  {
+    visuals_array.markers[i].action = visualization_msgs::Marker::DELETE;
+  }
 
-//bool listAnnotations(annotations_store::ListAnnotations::Request &request,
-//                     annotations_store::ListAnnotations::Response &response)
-//{
-//  ROS_DEBUG("listAnnotations() service call");
-//
-//  MapVector all_maps;
-//  all_maps = map_collection->pullAllResults( mr::Query(), true, "creation_time", false );
-//
-//  // Loop over all_maps to get the first of each session.
-//  for(MapVector::const_iterator map_iter = all_maps.begin(); map_iter != all_maps.end(); map_iter++)
-//  {
-//    ROS_DEBUG("listAnnotations() reading a map");
-//
-//    ROS_DEBUG("listAnnotations() adding a map to the result list.");
-//    ROS_DEBUG("listAnnotations() metadata is: '%s'", (*map_iter)->metadata.toString().c_str());
-//
-//    // Add the map info to our result list.
-//    annotations_store::MapListEntry new_entry;
-//    new_entry.name = (*map_iter)->lookupString("name");
-//    new_entry.date = (int64_t)(*map_iter)->lookupDouble("creation_time");
-//    new_entry.session_id = (*map_iter)->lookupString("session_id");
-//    new_entry.map_id = (*map_iter)->lookupString("uuid");
-//
-//    response.map_list.push_back(new_entry);
-//  }
-//
-//  ROS_DEBUG("listAnnotations() service call done");
-//  return true;
-//}
+  if (visuals_array.markers.size() > 0)
+  {
+    visuals_pub.publish(visuals_array);
+    visuals_array.markers.clear();
+  }
+}
 
-//bool lookupMap(std::string name, nav_msgs::OccupancyGridConstPtr &ptr) {
-//  MapVector matching_maps;
-//  try
-//  {
-//    matching_maps = map_collection->pullAllResults(mr::Query("uuid", name), false );
-//  } catch(const std::exception &e) {
-//    ROS_ERROR("Error during query: %s", e.what());
-//    return false;
-//  }
-//
-//  if (matching_maps.size() != 1)
-//  {
-//    ROS_ERROR("publishAnnotations() found %d matching maps instead of 1.  Failing.", (int) matching_maps.size());
-//    return false;
-//  }
-//  ptr = nav_msgs::OccupancyGridConstPtr( matching_maps[0] );
-//  return true;
-//}
+visualization_msgs::Marker makeVisual(const std::string& frame, const std::string& name, int id,
+                                      int type, double length, double width, double height,
+                                      const std_msgs::ColorRGBA& color, const geometry_msgs::Pose& pose,
+                                      bool clear = false)
+{
+  visualization_msgs::Marker visual, label;
+
+  visual.header.frame_id = frame;
+  visual.header.stamp = ros::Time::now();
+  visual.scale.x = width;  // scale in meters
+  visual.scale.y = length;
+  visual.scale.z = height;
+  visual.color = color;
+  visual.ns = name;
+  visual.id = id;
+  visual.pose = pose;
+  visual.pose.position.z = visual.scale.z/2.0;
+  visual.type = type;
+  visual.action = visualization_msgs::Marker::ADD;
+
+//  label = visual;
+//  label.id = visual.id + 1000000;  // visual id must be unique
+//  label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+//  label.pose.position.z = visual.pose.position.z + visual.scale.z/2.0 + 0.05; // just above the visual
+//  label.text = visual.ns.substr(3);  // i.e. strlen("WP ")
+//  label.scale.x = 0.1;
+//  label.scale.y = 0.1;
+//  label.scale.z = 0.1;
+
+  return visual;
+}
 
 bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
                         annotations_store::PublishAnnotations::Response &response)
@@ -174,19 +175,98 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
 
   try
   {
+    //remove from visualization tools and delete visualization markers
+    clearVisuals();
+
     MarkersVector matching_markers = markers_collection -> pullAllResults(mr::Query("map_uuid", request.map_uuid));
     ColumnsVector matching_columns = columns_collection -> pullAllResults(mr::Query("map_uuid", request.map_uuid));
     WallsVector   matching_walls   = walls_collection   -> pullAllResults(mr::Query("map_uuid", request.map_uuid));
     TablesVector  matching_tables  = tables_collection  -> pullAllResults(mr::Query("map_uuid", request.map_uuid));
 
-    // TODO publish visualization markers
-    if (matching_markers.size() > 0) markers_pub.publish(ar_msgs::AlvarMarkersConstPtr (matching_markers [0]));
-    if (matching_columns.size() > 0) columns_pub.publish(yocs_msgs::ColumnListConstPtr (matching_columns [0]));
-    if (matching_walls.size()   > 0)   walls_pub.publish(yocs_msgs::WallListConstPtr   (matching_walls   [0]));
-    if (matching_tables.size()  > 0)  tables_pub.publish(yocs_msgs::TableListConstPtr  (matching_tables  [0]));
+    if (matching_markers.size() == matching_columns.size() == matching_walls.size() == matching_tables.size() == 0)
+    {
+      ROS_WARN("No annotations found for map '%s'; we don't consider this an error", request.map_uuid.c_str());
+      response.found = false;
+      return true;  // we don't consider this an error
+    }
+    response.found = true;
 
-    ROS_INFO("Annotations fetched: %lu markers, %lu columns, %lu walls, %lu tables",
-             matching_markers.size(), matching_columns.size(), matching_walls.size(),matching_tables.size());
+    if (matching_markers.size() > 0)
+    {
+      std_msgs::ColorRGBA color; color.r = color.b = color.g = color.a = 1.0;
+      for (int i = 0; i < matching_markers[0]->markers.size(); ++i)
+      {
+        ar_msgs::AlvarMarker ann = matching_markers[0]->markers[i];
+        std::stringstream name; name << ann.id;
+        visuals_array.markers.push_back(makeVisual(ann.pose.header.frame_id, name.str(), i,
+                                                   visualization_msgs::Marker::CUBE,
+                                                   0.2, 0.2, 0.02,
+                                                   color, ann.pose.pose));
+      }
+      markers_pub.publish(ar_msgs::AlvarMarkersConstPtr(matching_markers [0]));
+    }
+    if (matching_columns.size() > 0)
+    {
+      std_msgs::ColorRGBA color; color.b = 1.0; color.a = 0.5;
+      for (int i = 0; i < matching_columns[0]->obstacles.size(); ++i)
+      {
+        yocs_msgs::Column ann = matching_columns[0]->obstacles[i];
+        visuals_array.markers.push_back(makeVisual(ann.pose.header.frame_id, ann.name, i,
+                                                   visualization_msgs::Marker::CYLINDER,
+                                                   ann.radius*2, ann.radius*2, ann.height,
+                                                   color, ann.pose.pose.pose));
+      }
+      columns_pub.publish(yocs_msgs::ColumnListConstPtr(matching_columns [0]));
+    }
+
+    if (matching_walls.size() > 0)
+    {
+      std_msgs::ColorRGBA color; color.r = 0.2; color.g = 0.4; color.b = 0.4; color.a = 0.5;
+      for (int i = 0; i < matching_walls[0]->obstacles.size(); ++i)
+      {
+        yocs_msgs::Wall ann = matching_walls[0]->obstacles[i];
+        visuals_array.markers.push_back(makeVisual(ann.pose.header.frame_id, ann.name, i,
+                                                   visualization_msgs::Marker::CUBE,
+                                                   ann.length, ann.width, ann.height,
+                                                   color, ann.pose.pose.pose));
+      }
+      walls_pub.publish(yocs_msgs::WallListConstPtr(matching_walls[0]));
+    }
+
+    if (matching_tables.size() > 0)
+    {
+      std_msgs::ColorRGBA color; color.r = 0.45; color.g = 0.2; color.a = 0.7;
+      for (int i = 0; i < matching_tables[0]->tables.size(); ++i)
+      {
+        yocs_msgs::Table ann = matching_tables[0]->tables[i];
+        visuals_array.markers.push_back(makeVisual(ann.pose.header.frame_id, ann.name, i,
+                                                   visualization_msgs::Marker::CYLINDER,
+                                                   ann.radius*2, ann.radius*2, ann.height,
+                                                   color, ann.pose.pose.pose));
+      }
+      tables_pub.publish(yocs_msgs::TableListConstPtr(matching_tables[0]));
+    }
+
+    // publish visualization markers
+    if (visuals_array.markers.size() > 0)
+      visuals_pub.publish(visuals_array);
+
+    // Extra sanity checking
+    if (matching_markers.size() == matching_columns.size() == matching_walls.size() == matching_tables.size() == 1)
+    {
+      ROS_INFO("Annotations fetched: %lu markers, %lu columns, %lu walls, %lu tables",
+               matching_markers[0]->markers.size(), matching_columns[0]->obstacles.size(),
+               matching_walls[0]->obstacles.size(),matching_tables[0]->tables.size());
+    }
+    else
+    {
+      ROS_WARN("Incoherent annotation entries: %lu markers, %lu columns, %lu walls, %lu tables",
+               matching_markers.size(), matching_columns.size(), matching_walls.size(),matching_tables.size());
+    }
+
+    // Keep track of currently published annotations to republish if we receive updated data
+    pub_map_id = request.map_uuid;
+    return true;
   }
   catch(const std::exception &e) {
     ROS_ERROR("Error during query: %s", e.what());
@@ -220,49 +300,49 @@ bool deleteAnnotations(annotations_store::DeleteAnnotations::Request &request,
   removed += tables_collection  -> removeMessages(mr::Query("map_uuid", request.map_uuid));
 
   if (removed == 0)
-    ROS_WARN("No annotations found for map '%s')", request.map_uuid.c_str());
-  else if (removed != 4)
-    ROS_WARN("Inconsistent number of annotations types (%d)", removed);
+  {
+    ROS_WARN("No annotations found for map '%s'; we don't consider this an error", request.map_uuid.c_str());
+    response.found = false;
+  }
+  else
+  {
+    if (removed != 4)  // this should not happen
+      ROS_WARN("Inconsistent number of annotations types (%d)", removed);
 
-  return (removed > 0);
+    // Check if we are removing currently published annotations to "unpublish" them if so
+    if (pub_map_id == request.map_uuid)
+    {
+      annotations_store::PublishAnnotations::Request pubReq;
+      annotations_store::PublishAnnotations::Response pubRes;
+      pubReq.map_uuid = request.map_uuid;
+      if (publishAnnotations(pubReq, pubRes) == false)
+        ROS_WARN("Unpublish removed annotations failed for map '%s'", request.map_uuid.c_str());
+    }
+  }
+
+  // TODO catch db exception
+  return true;
 }
-//
+
+// TODO we will need this if we want not to lose renamed maps' annotations
 //bool renameAnnotations(annotations_store::RenameAnnotations::Request &request,
 //                       annotations_store::RenameAnnotations::Response &response)
 //{
 //  map_collection->modifyMetadata(mr::Query("uuid", request.map_id), mr::Metadata("name", request.new_name));
 //  return true;
 //}
-//
-//
-//bool dynamicMap(nav_msgs::GetMap::Request &request,
-//		nav_msgs::GetMap::Response &response) {
-//  if (last_map == "") {
-//    return false;
-//  }
-//  nav_msgs::OccupancyGridConstPtr map;
-//  if (lookupMap(last_map, map))
-//  {
-//    response.map = *map;
-//  }
-//  else
-//  {
-//    return false;
-//  }
-//  return true;
-//}
+
 
 bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
                      annotations_store::SaveAnnotations::Response &response)
 {
-// TODO verify that the map exists
+// TODO verify that the map exists; I need a version of the removed "lookMap"
 //  nav_msgs::GetMap srv;
 //  if (!dynamic_map_service_client.call(srv)) {
 //    ROS_ERROR("Dynamic map getter service call failed");
 //    return false;
 //  }
 
-//  std::string uuid_string = uuidGenerate();
   mr::Metadata metadata = mr::Metadata("map_name",   request.map_name, // TODO try renaming to map_uuid and map_name if all ok
                                        "map_uuid",   request.map_uuid,
                                        "session_id", request.session_id);
@@ -283,6 +363,16 @@ bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
     ROS_INFO("Annotations saved: %lu markers, %lu columns, %lu walls, %lu tables",
              markers_msg.markers.size(), columns_msg.obstacles.size(),
              walls_msg.obstacles.size(), tables_msg.tables.size());
+
+    // Check if we are modifying currently published annotations to republish them if so
+    if (pub_map_id == request.map_uuid)
+    {
+      annotations_store::PublishAnnotations::Request pubReq;
+      annotations_store::PublishAnnotations::Response pubRes;
+      pubReq.map_uuid = request.map_uuid;
+      if (publishAnnotations(pubReq, pubRes) == false)
+        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
+    }
 
     return true;
   }
@@ -318,10 +408,12 @@ int main (int argc, char** argv)
 //    last_map = "";
 //  }
 
-  markers_pub = nh.advertise<ar_msgs::AlvarMarkers> ("annotations/markers", 1, true);
-  columns_pub = nh.advertise<yocs_msgs::ColumnList> ("annotations/columns", 1, true);
-  walls_pub   = nh.advertise<yocs_msgs::WallList>   ("annotations/walls",   1, true);
-  tables_pub  = nh.advertise<yocs_msgs::TableList>  ("annotations/tables",  1, true);
+  markers_pub = nh.advertise<ar_msgs::AlvarMarkers> ("markers", 1, true);
+  columns_pub = nh.advertise<yocs_msgs::ColumnList> ("columns", 1, true);
+  walls_pub   = nh.advertise<yocs_msgs::WallList>   ("walls",   1, true);
+  tables_pub  = nh.advertise<yocs_msgs::TableList>  ("tables",  1, true);
+
+  visuals_pub = nh.advertise<visualization_msgs::MarkerArray>  ("visual_markers", 1, true);
 //  if (last_map != "")
 //  {
 //    nav_msgs::OccupancyGridConstPtr map;
@@ -339,10 +431,10 @@ int main (int argc, char** argv)
 //    }
 //  }
 
-  ros::Subscriber markers_sub = nh.subscribe("annotations/markers", 1, onMarkersReceived);
-  ros::Subscriber tables_sub  = nh.subscribe("annotations/tables",  1, onTablesReceived);
-  ros::Subscriber columns_sub = nh.subscribe("annotations/columns", 1, onColumnsReceived);
-  ros::Subscriber walls_sub   = nh.subscribe("annotations/walls",   1, onWallsReceived);
+  ros::Subscriber markers_sub = nh.subscribe("markers", 1, onMarkersReceived);
+  ros::Subscriber tables_sub  = nh.subscribe("tables",  1, onTablesReceived);
+  ros::Subscriber columns_sub = nh.subscribe("columns", 1, onColumnsReceived);
+  ros::Subscriber walls_sub   = nh.subscribe("walls",   1, onWallsReceived);
 
 //  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);
   ros::ServiceServer publish_annotations_srv = nh.advertiseService("publish_annotations", publishAnnotations);

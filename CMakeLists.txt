@@ -10,6 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   warehouse_ros
   ar_track_alvar
   yocs_msgs
+  visualization_msgs
 )
 
 add_message_files(
