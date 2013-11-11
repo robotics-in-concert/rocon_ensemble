@@ -144,9 +144,12 @@ visualization_msgs::Marker makeVisual(const std::string& frame, const std::strin
   visual.ns = name;
   visual.id = id;
   visual.pose = pose;
-  visual.pose.position.z = visual.scale.z/2.0;
   visual.type = type;
   visual.action = visualization_msgs::Marker::ADD;
+
+  // Make z-coordinate the lowest point of visuals, so they appear to lay in the floor if they
+  // have zero z. This is wrong for AR markers, but doesn't matter as they are rather small.
+  visual.pose.position.z += visual.scale.z/2.0;
 
 //  label = visual;
 //  label.id = visual.id + 1000000;  // visual id must be unique
