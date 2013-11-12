@@ -427,10 +427,10 @@ int main (int argc, char** argv)
 //    last_map = "";
 //  }
 
-  markers_pub = nh.advertise<ar_msgs::AlvarMarkers> ("markers", 1, true);
-  columns_pub = nh.advertise<yocs_msgs::ColumnList> ("columns", 1, true);
-  walls_pub   = nh.advertise<yocs_msgs::WallList>   ("walls",   1, true);
-  tables_pub  = nh.advertise<yocs_msgs::TableList>  ("tables",  1, true);
+  markers_pub = nh.advertise<ar_msgs::AlvarMarkers> ("markers_out", 1, true);
+  columns_pub = nh.advertise<yocs_msgs::ColumnList> ("columns_out", 1, true);
+  walls_pub   = nh.advertise<yocs_msgs::WallList>   ("walls_out",   1, true);
+  tables_pub  = nh.advertise<yocs_msgs::TableList>  ("tables_out",  1, true);
 
   visuals_pub = nh.advertise<visualization_msgs::MarkerArray>  ("visual_markers", 1, true);
 //  if (last_map != "")
@@ -450,16 +450,18 @@ int main (int argc, char** argv)
 //    }
 //  }
 
-  ros::Subscriber markers_sub = nh.subscribe("markers", 1, onMarkersReceived);
-  ros::Subscriber tables_sub  = nh.subscribe("tables",  1, onTablesReceived);
-  ros::Subscriber columns_sub = nh.subscribe("columns", 1, onColumnsReceived);
-  ros::Subscriber walls_sub   = nh.subscribe("walls",   1, onWallsReceived);
+  ros::Subscriber markers_sub = nh.subscribe("markers_in", 1, onMarkersReceived);
+  ros::Subscriber tables_sub  = nh.subscribe("tables_in",  1, onTablesReceived);
+  ros::Subscriber columns_sub = nh.subscribe("columns_in", 1, onColumnsReceived);
+  ros::Subscriber walls_sub   = nh.subscribe("walls_in",   1, onWallsReceived);
 
-//  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);
   ros::ServiceServer publish_annotations_srv = nh.advertiseService("publish_annotations", publishAnnotations);
   ros::ServiceServer delete_annotations_srv  = nh.advertiseService("delete_annotations",  deleteAnnotations);
   ros::ServiceServer rename_annotations_srv  = nh.advertiseService("rename_annotations",  renameAnnotations);
   ros::ServiceServer save_annotations_srv    = nh.advertiseService("save_annotations",    saveAnnotations);
+
+//  NOT IMPLEMENTED, and not useful by now
+//  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);
 //  ros::ServiceServer dynamic_annotations_srv = nh.advertiseService("dynamic_annotations", dynamicMap);
 
   ROS_DEBUG("Annotations manager running");
