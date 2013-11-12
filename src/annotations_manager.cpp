@@ -65,6 +65,7 @@ service calls:
 #include <annotations_store/DeleteAnnotations.h>
 #include <annotations_store/RenameAnnotations.h>
 #include <annotations_store/SaveAnnotations.h>
+#include <annotations_store/SaveMarkers.h>
 #include <ar_track_alvar/AlvarMarkers.h>
 #include <yocs_msgs/ColumnList.h>
 #include <yocs_msgs/WallList.h>
@@ -407,6 +408,54 @@ bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
   }
 }
 
+
+bool saveMarkers(annotations_store::SaveMarkers::Request &request,
+                 annotations_store::SaveMarkers::Response &response)
+{
+  ROS_INFO("Save markers for map '%s'", request.map_uuid.c_str());
+
+  try
+  {
+    //remove from visualization tools and delete visualization markers
+    clearVisuals();
+
+    MarkersVector matching_markers = markers_collection->pullAllResults(mr::Query("map_uuid", request.map_uuid));
+    if (matching_markers.size() == 0)
+    {
+      ROS_WARN("No markers found for map '%s'; we don't consider this an error", request.map_uuid.c_str());
+      response.found = false;
+    }
+    else
+    {
+      //matching_markers[0].get()->metadata
+
+      markers_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
+      markers_collection->insert(request.markers, (const mongo_ros::Metadata&)matching_markers[0].get()->metadata);
+      response.found = true;
+
+      ROS_INFO("Markers saved: %lu markers", request.markers.markers.size());
+
+      // Check if we are modifying currently published annotations to republish them if so
+      if (pub_map_id == request.map_uuid)
+      {
+        annotations_store::PublishAnnotations::Request pubReq;
+        annotations_store::PublishAnnotations::Response pubRes;
+        pubReq.map_uuid = request.map_uuid;
+        if (publishAnnotations(pubReq, pubRes) == false)
+          ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
+      }
+    }
+    return true;
+  }
+  catch (mongo::DBException& e)
+  {
+    ROS_ERROR("Error during saving: %s", e.what());
+    response.error_msg = e.what();
+    return false;
+  }
+}
+
+
 int main (int argc, char** argv)
 {
   ros::init(argc, argv, "annotations_manager");
@@ -459,6 +508,9 @@ int main (int argc, char** argv)
   ros::ServiceServer delete_annotations_srv  = nh.advertiseService("delete_annotations",  deleteAnnotations);
   ros::ServiceServer rename_annotations_srv  = nh.advertiseService("rename_annotations",  renameAnnotations);
   ros::ServiceServer save_annotations_srv    = nh.advertiseService("save_annotations",    saveAnnotations);
+
+  // Single annotation services
+  ros::ServiceServer save_markers_srv = nh.advertiseService("save_markers", saveMarkers);
 
 //  NOT IMPLEMENTED, and not useful by now
 //  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);

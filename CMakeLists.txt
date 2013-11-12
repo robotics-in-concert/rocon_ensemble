@@ -26,10 +26,11 @@ add_service_files(
   PublishAnnotations.srv
   RenameAnnotations.srv
   SaveAnnotations.srv
+  SaveMarkers.srv
 )
-generate_messages()
+generate_messages(DEPENDENCIES ar_track_alvar)
 
-catkin_package( CATKIN_DEPENDS message_runtime )
+catkin_package()
 
 include_directories(${catkin_INCLUDE_DIRS})
 
