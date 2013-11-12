@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2011, Willow Garage, Inc.
+ * Copyright (c) 2013, Yujin Robot.
+ *
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,22 +29,30 @@
  */
 
 /*
+ * Based on map_store, but addapted to publish/store semantic information (annotations)
 behavior:
  - sets up connection to warehouse
- - tells warehouse to publish latest map of any session (or default map?  or nothing?)
+ - tells warehouse to publish latest annotations of any session (this is commented by now; can be misleading)
  - spins, handling service calls
 
 service calls:
+ - publish_annotations(map uuid) returns true if annotations were found for the given map
+   - queries warehouse for annotations associated to the given map
+   - publishes the annotations on markers, tables, columns, walls topics
+   - publishes visualization markers for all the annotations
+   - sets map uuid as the current map, so we can update published annotations if needed
+ - rename_annotations(map uuid, new name) returns void
+   - renames the associated map identified by map_uuid on annotations database
+ - delete_annotations(map uuid) returns true if annotations were found for the given map
+   - deletes the annotations associated to the given map
+   - if current map is set, calls publish_annotations to reflect changes
+ - save_annotations(map uuid, map name, session id) returns error message if any
+   - saves currently published annotations as associated to the given map
+   - if current map is set, calls publish_annotations to reflect changes
+
+ NOT IMPLEMENTED, and not useful by now
  - list_maps() returns list of map metadata: {id, name, timestamp, maybe thumbnail}
-   - query for all maps.
- - delete_map(map id) returns void
-   - Deletes the given map
- - rename_map[(map id, name) returns void
-   - renames a given map
- - publish_map(map id) returns void
-   - queries warehouse for map of given id
-   - publishes the map on /map
-   - sets dynamic map up to load it\
+   - query for all annotations.
  - dynamic_map() returns nav_msgs/OccupancyGrid
    - returns the dynamic map
  */
@@ -130,8 +139,7 @@ void clearVisuals()
 
 visualization_msgs::Marker makeVisual(const std::string& frame, const std::string& name, int id,
                                       int type, double length, double width, double height,
-                                      const std_msgs::ColorRGBA& color, const geometry_msgs::Pose& pose,
-                                      bool clear = false)
+                                      const std_msgs::ColorRGBA& color, const geometry_msgs::Pose& pose)
 {
   visualization_msgs::Marker visual, label;
 
@@ -151,16 +159,20 @@ visualization_msgs::Marker makeVisual(const std::string& frame, const std::strin
   // have zero z. This is wrong for AR markers, but doesn't matter as they are rather small.
   visual.pose.position.z += visual.scale.z/2.0;
 
-//  label = visual;
-//  label.id = visual.id + 1000000;  // visual id must be unique
-//  label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
-//  label.pose.position.z = visual.pose.position.z + visual.scale.z/2.0 + 0.05; // just above the visual
-//  label.text = visual.ns.substr(3);  // i.e. strlen("WP ")
-//  label.scale.x = 0.1;
-//  label.scale.y = 0.1;
-//  label.scale.z = 0.1;
-
   return visual;
+}
+
+visualization_msgs::Marker makeLabel(const visualization_msgs::Marker& visual)
+{
+  visualization_msgs::Marker label = visual;
+  label.id = visual.id + 1000000;  // visual id must be unique
+  label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+  label.pose.position.z = visual.pose.position.z + visual.scale.z/2.0 + 0.1; // just above the visual
+  label.text = visual.ns;
+  label.scale.x = label.scale.y = label.scale.z = 0.12;
+  // label.color.r = label.color.g = label.color.b = 0.0; label.color.a = 1.0; // make solid black
+
+  return label;
 }
 
 bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
@@ -171,10 +183,6 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
 //  last_map = request.map_id;
 //  ros::NodeHandle nh;
 //  nh.setParam("last_map_id", last_map);
-//  ar_msgs::AlvarMarkers markers;
-//  yocs_msgs::ColumnList columns;
-//  yocs_msgs::WallList   walls;
-//  yocs_msgs::TableList  tables;
 
   try
   {
@@ -186,7 +194,8 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
     WallsVector   matching_walls   = walls_collection   -> pullAllResults(mr::Query("map_uuid", request.map_uuid));
     TablesVector  matching_tables  = tables_collection  -> pullAllResults(mr::Query("map_uuid", request.map_uuid));
 
-    if (matching_markers.size() == matching_columns.size() == matching_walls.size() == matching_tables.size() == 0)
+    if ((matching_markers.size() == 0) && (matching_tables.size() == 0) &&
+        (matching_columns.size() == 0) && (matching_walls.size() == 0))
     {
       ROS_WARN("No annotations found for map '%s'; we don't consider this an error", request.map_uuid.c_str());
       response.found = false;
@@ -203,8 +212,9 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
         std::stringstream name; name << ann.id;
         visuals_array.markers.push_back(makeVisual(ann.pose.header.frame_id, name.str(), i,
                                                    visualization_msgs::Marker::CUBE,
-                                                   0.2, 0.2, 0.02,
+                                                   0.18, 0.18, 0.01,
                                                    color, ann.pose.pose));
+        visuals_array.markers.push_back(makeLabel(visuals_array.markers.back()));
       }
       markers_pub.publish(ar_msgs::AlvarMarkersConstPtr(matching_markers [0]));
     }
@@ -218,6 +228,7 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
                                                    visualization_msgs::Marker::CYLINDER,
                                                    ann.radius*2, ann.radius*2, ann.height,
                                                    color, ann.pose.pose.pose));
+        visuals_array.markers.push_back(makeLabel(visuals_array.markers.back()));
       }
       columns_pub.publish(yocs_msgs::ColumnListConstPtr(matching_columns [0]));
     }
@@ -232,6 +243,7 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
                                                    visualization_msgs::Marker::CUBE,
                                                    ann.length, ann.width, ann.height,
                                                    color, ann.pose.pose.pose));
+        visuals_array.markers.push_back(makeLabel(visuals_array.markers.back()));
       }
       walls_pub.publish(yocs_msgs::WallListConstPtr(matching_walls[0]));
     }
@@ -246,6 +258,7 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
                                                    visualization_msgs::Marker::CYLINDER,
                                                    ann.radius*2, ann.radius*2, ann.height,
                                                    color, ann.pose.pose.pose));
+        visuals_array.markers.push_back(makeLabel(visuals_array.markers.back()));
       }
       tables_pub.publish(yocs_msgs::TableListConstPtr(matching_tables[0]));
     }
@@ -255,7 +268,8 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
       visuals_pub.publish(visuals_array);
 
     // Extra sanity checking
-    if (matching_markers.size() == matching_columns.size() == matching_walls.size() == matching_tables.size() == 1)
+    if ((matching_markers.size() == 1) && (matching_tables.size() == 1) &&
+        (matching_columns.size() == 1) && (matching_walls.size() == 1))
     {
       ROS_INFO("Annotations fetched: %lu markers, %lu columns, %lu walls, %lu tables",
                matching_markers[0]->markers.size(), matching_columns[0]->obstacles.size(),
@@ -327,13 +341,19 @@ bool deleteAnnotations(annotations_store::DeleteAnnotations::Request &request,
   return true;
 }
 
-// TODO we will need this if we want not to lose renamed maps' annotations
-//bool renameAnnotations(annotations_store::RenameAnnotations::Request &request,
-//                       annotations_store::RenameAnnotations::Response &response)
-//{
-//  map_collection->modifyMetadata(mr::Query("uuid", request.map_id), mr::Metadata("name", request.new_name));
-//  return true;
-//}
+bool renameAnnotations(annotations_store::RenameAnnotations::Request &request,
+                       annotations_store::RenameAnnotations::Response &response)
+{
+  markers_collection -> modifyMetadata(mr::Query("map_uuid", request.map_uuid),
+                                       mr::Metadata("map_name", request.new_name));
+  columns_collection -> modifyMetadata(mr::Query("map_uuid", request.map_uuid),
+                                       mr::Metadata("map_name", request.new_name));
+  walls_collection   -> modifyMetadata(mr::Query("map_uuid", request.map_uuid),
+                                       mr::Metadata("map_name", request.new_name));
+  tables_collection  -> modifyMetadata(mr::Query("map_uuid", request.map_uuid),
+                                       mr::Metadata("map_name", request.new_name));
+  return true;
+}
 
 
 bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
@@ -346,7 +366,7 @@ bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
 //    return false;
 //  }
 
-  mr::Metadata metadata = mr::Metadata("map_name",   request.map_name, // TODO try renaming to map_uuid and map_name if all ok
+  mr::Metadata metadata = mr::Metadata("map_name",   request.map_name,
                                        "map_uuid",   request.map_uuid,
                                        "session_id", request.session_id);
 
@@ -392,9 +412,6 @@ int main (int argc, char** argv)
   ros::init(argc, argv, "annotations_manager");
   ros::NodeHandle nh;
 
-//  map_collection = new mr::MessageCollection<nav_msgs::OccupancyGrid>("annotations_store", "maps");
-//  map_collection->ensureIndex("uuid");
-
   markers_collection = new mr::MessageCollection<ar_msgs::AlvarMarkers> ("annotations_store", "markers");
   columns_collection = new mr::MessageCollection<yocs_msgs::ColumnList> ("annotations_store", "columns");
   walls_collection   = new mr::MessageCollection<yocs_msgs::WallList>   ("annotations_store", "walls");
@@ -404,7 +421,6 @@ int main (int argc, char** argv)
   columns_collection -> ensureIndex("map_uuid");
   walls_collection   -> ensureIndex("map_uuid");
   tables_collection  -> ensureIndex("map_uuid");
-
 
 //  if (!nh.getParam("last_map_id", last_map))   TODO I don't think it make sense to pub last annotations
 //  {
@@ -442,7 +458,7 @@ int main (int argc, char** argv)
 //  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);
   ros::ServiceServer publish_annotations_srv = nh.advertiseService("publish_annotations", publishAnnotations);
   ros::ServiceServer delete_annotations_srv  = nh.advertiseService("delete_annotations",  deleteAnnotations);
-//  ros::ServiceServer rename_annotations_srv  = nh.advertiseService("rename_annotations",  renameAnnotations);
+  ros::ServiceServer rename_annotations_srv  = nh.advertiseService("rename_annotations",  renameAnnotations);
   ros::ServiceServer save_annotations_srv    = nh.advertiseService("save_annotations",    saveAnnotations);
 //  ros::ServiceServer dynamic_annotations_srv = nh.advertiseService("dynamic_annotations", dynamicMap);
 
@@ -451,6 +467,9 @@ int main (int argc, char** argv)
   ros::spin();
 
   delete markers_collection;
+  delete columns_collection;
+  delete walls_collection;
+  delete tables_collection;
 
   return 0;
 }
