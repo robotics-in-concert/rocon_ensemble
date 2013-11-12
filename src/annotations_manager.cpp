@@ -66,6 +66,9 @@ service calls:
 #include <annotations_store/RenameAnnotations.h>
 #include <annotations_store/SaveAnnotations.h>
 #include <annotations_store/SaveMarkers.h>
+#include <annotations_store/SaveTables.h>
+#include <annotations_store/SaveColumns.h>
+#include <annotations_store/SaveWalls.h>
 #include <ar_track_alvar/AlvarMarkers.h>
 #include <yocs_msgs/ColumnList.h>
 #include <yocs_msgs/WallList.h>
@@ -408,7 +411,6 @@ bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
   }
 }
 
-
 bool saveMarkers(annotations_store::SaveMarkers::Request &request,
                  annotations_store::SaveMarkers::Response &response)
 {
@@ -419,31 +421,140 @@ bool saveMarkers(annotations_store::SaveMarkers::Request &request,
     //remove from visualization tools and delete visualization markers
     clearVisuals();
 
-    MarkersVector matching_markers = markers_collection->pullAllResults(mr::Query("map_uuid", request.map_uuid));
-    if (matching_markers.size() == 0)
+    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
+                                         "map_uuid",   request.map_uuid,
+                                         "session_id", "");
+
+    markers_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
+    markers_collection->insert(request.markers, metadata);
+    response.found = true;
+
+    ROS_INFO("Markers saved: %lu markers", request.markers.markers.size());
+
+    // Check if we are modifying currently published annotations to republish them if so
+    if (pub_map_id == request.map_uuid)
     {
-      ROS_WARN("No markers found for map '%s'; we don't consider this an error", request.map_uuid.c_str());
-      response.found = false;
+      annotations_store::PublishAnnotations::Request pubReq;
+      annotations_store::PublishAnnotations::Response pubRes;
+      pubReq.map_uuid = request.map_uuid;
+      if (publishAnnotations(pubReq, pubRes) == false)
+        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
     }
-    else
+    return true;
+  }
+  catch (mongo::DBException& e)
+  {
+    ROS_ERROR("Error during saving: %s", e.what());
+    response.error_msg = e.what();
+    return false;
+  }
+}
+
+bool saveTables(annotations_store::SaveTables::Request &request,
+                annotations_store::SaveTables::Response &response)
+{
+  ROS_INFO("Save tables for map '%s'", request.map_uuid.c_str());
+
+  try
+  {
+    //remove from visualization tools and delete visualization tables
+    clearVisuals();
+
+    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
+                                         "map_uuid",   request.map_uuid,
+                                         "session_id", "");
+
+    tables_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
+    tables_collection->insert(request.tables, metadata);
+    response.found = true;
+
+    ROS_INFO("Tables saved: %lu tables", request.tables.tables.size());
+
+    // Check if we are modifying currently published annotations to republish them if so
+    if (pub_map_id == request.map_uuid)
     {
-      //matching_markers[0].get()->metadata
+      annotations_store::PublishAnnotations::Request pubReq;
+      annotations_store::PublishAnnotations::Response pubRes;
+      pubReq.map_uuid = request.map_uuid;
+      if (publishAnnotations(pubReq, pubRes) == false)
+        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
+    }
+    return true;
+  }
+  catch (mongo::DBException& e)
+  {
+    ROS_ERROR("Error during saving: %s", e.what());
+    response.error_msg = e.what();
+    return false;
+  }
+}
 
-      markers_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
-      markers_collection->insert(request.markers, (const mongo_ros::Metadata&)matching_markers[0].get()->metadata);
-      response.found = true;
+bool saveColumns(annotations_store::SaveColumns::Request &request,
+                 annotations_store::SaveColumns::Response &response)
+{
+  ROS_INFO("Save columns for map '%s'", request.map_uuid.c_str());
 
-      ROS_INFO("Markers saved: %lu markers", request.markers.markers.size());
+  try
+  {
+    //remove from visualization tools and delete visualization columns
+    clearVisuals();
 
-      // Check if we are modifying currently published annotations to republish them if so
-      if (pub_map_id == request.map_uuid)
-      {
-        annotations_store::PublishAnnotations::Request pubReq;
-        annotations_store::PublishAnnotations::Response pubRes;
-        pubReq.map_uuid = request.map_uuid;
-        if (publishAnnotations(pubReq, pubRes) == false)
-          ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
-      }
+    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
+                                         "map_uuid",   request.map_uuid,
+                                         "session_id", "");
+
+    columns_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
+    columns_collection->insert(request.columns, metadata);
+    response.found = true;
+
+    ROS_INFO("Columns saved: %lu columns", request.columns.obstacles.size());
+
+    // Check if we are modifying currently published annotations to republish them if so
+    if (pub_map_id == request.map_uuid)
+    {
+      annotations_store::PublishAnnotations::Request pubReq;
+      annotations_store::PublishAnnotations::Response pubRes;
+      pubReq.map_uuid = request.map_uuid;
+      if (publishAnnotations(pubReq, pubRes) == false)
+        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
+    }
+    return true;
+  }
+  catch (mongo::DBException& e)
+  {
+    ROS_ERROR("Error during saving: %s", e.what());
+    response.error_msg = e.what();
+    return false;
+  }
+}
+
+bool saveWalls(annotations_store::SaveWalls::Request &request,
+               annotations_store::SaveWalls::Response &response)
+{
+  ROS_INFO("Save walls for map '%s'", request.map_uuid.c_str());
+
+  try
+  {
+    //remove from visualization tools and delete visualization walls
+    clearVisuals();
+
+    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
+                                         "map_uuid",   request.map_uuid,
+                                         "session_id", "");
+
+    walls_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
+    walls_collection->insert(request.walls, metadata);
+
+    ROS_INFO("Walls saved: %lu walls", request.walls.obstacles.size());
+
+    // Check if we are modifying currently published annotations to republish them if so
+    if (pub_map_id == request.map_uuid)
+    {
+      annotations_store::PublishAnnotations::Request pubReq;
+      annotations_store::PublishAnnotations::Response pubRes;
+      pubReq.map_uuid = request.map_uuid;
+      if (publishAnnotations(pubReq, pubRes) == false)
+        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
     }
     return true;
   }
@@ -509,8 +620,11 @@ int main (int argc, char** argv)
   ros::ServiceServer rename_annotations_srv  = nh.advertiseService("rename_annotations",  renameAnnotations);
   ros::ServiceServer save_annotations_srv    = nh.advertiseService("save_annotations",    saveAnnotations);
 
-  // Single annotation services
+  // Single annotation type services
   ros::ServiceServer save_markers_srv = nh.advertiseService("save_markers", saveMarkers);
+  ros::ServiceServer save_tables_srv  = nh.advertiseService("save_tables",  saveTables);
+  ros::ServiceServer save_columns_srv = nh.advertiseService("save_columns", saveColumns);
+  ros::ServiceServer save_walls_srv   = nh.advertiseService("save_walls",   saveWalls);
 
 //  NOT IMPLEMENTED, and not useful by now
 //  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);

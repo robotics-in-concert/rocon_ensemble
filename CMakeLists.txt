@@ -27,8 +27,11 @@ add_service_files(
   RenameAnnotations.srv
   SaveAnnotations.srv
   SaveMarkers.srv
+  SaveColumns.srv
+  SaveTables.srv
+  SaveWalls.srv
 )
-generate_messages(DEPENDENCIES ar_track_alvar)
+generate_messages(DEPENDENCIES ar_track_alvar yocs_msgs)
 
 catkin_package()
 
