@@ -33,17 +33,23 @@ add_service_files(
 )
 generate_messages(DEPENDENCIES ar_track_alvar yocs_msgs)
 
-catkin_package()
+catkin_package(
+  INCLUDE_DIRS include
+)
 
-include_directories(${catkin_INCLUDE_DIRS})
+include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(annotations_saver src/annotations_saver.cpp)
 add_dependencies(annotations_saver annotations_store_gencpp)
 target_link_libraries(annotations_saver uuid ${catkin_LIBRARIES})
 
-add_executable(annotations_manager src/annotations_manager.cpp)
-add_dependencies(annotations_manager annotations_store_gencpp)
+add_executable(annotations_manager src/annotations_manager_node.cpp)
+add_dependencies(annotations_manager annotations_manager_lib)
 target_link_libraries(annotations_manager uuid ${catkin_LIBRARIES})
+
+add_library(annotations_manager_lib src/annotations_manager/annotations_manager.cpp
+                                    src/annotations_manager/single_savers.cpp)
+add_dependencies(annotations_manager_lib annotations_store_gencpp)
 
 add_rostest(test/annotations_store.test)
 
