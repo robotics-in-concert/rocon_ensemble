@@ -28,16 +28,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "annotations_store/annotations_manager.hpp"
+#include <ros/ros.h>
+#include <annotations_store/annotations_manager.hpp>
 
 int main (int argc, char** argv)
 {
   ros::init(argc, argv, "annotations_manager");
 
-  yocs::AnnotationsManager am; 
+  yocs::AnnotationsManager* am = new yocs::AnnotationsManager();
+
   ROS_DEBUG("Annotations manager running");
 
   ros::spin();
+
+  delete am;
 
   return 0;
 }

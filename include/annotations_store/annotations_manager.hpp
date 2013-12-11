@@ -27,9 +27,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#ifndef _ANNOTATIONS_MANAGER_HPP_
-#define _ANNOTATIONS_MANAGER_HPP_
 /*
  * Based on map_store, but addapted to publish/store semantic information (annotations)
 behavior:
@@ -58,6 +55,9 @@ service calls:
  - dynamic_map() returns nav_msgs/OccupancyGrid
    - returns the dynamic map
  */
+#ifndef _ANNOTATIONS_MANAGER_HPP_
+#define _ANNOTATIONS_MANAGER_HPP_
+
 #include <ros/ros.h>
 #include <mongo_ros/message_collection.h>
 #include <visualization_msgs/MarkerArray.h>
