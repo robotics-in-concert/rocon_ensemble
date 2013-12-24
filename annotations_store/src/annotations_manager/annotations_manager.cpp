@@ -28,106 +28,78 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * Based on map_store, but addapted to publish/store semantic information (annotations)
-behavior:
- - sets up connection to warehouse
- - tells warehouse to publish latest annotations of any session (this is commented by now; can be misleading)
- - spins, handling service calls
+#include "annotations_store/annotations_manager.hpp"
 
-service calls:
- - publish_annotations(map uuid) returns true if annotations were found for the given map
-   - queries warehouse for annotations associated to the given map
-   - publishes the annotations on markers, tables, columns, walls topics
-   - publishes visualization markers for all the annotations
-   - sets map uuid as the current map, so we can update published annotations if needed
- - rename_annotations(map uuid, new name) returns void
-   - renames the associated map identified by map_uuid on annotations database
- - delete_annotations(map uuid) returns true if annotations were found for the given map
-   - deletes the annotations associated to the given map
-   - if current map is set, calls publish_annotations to reflect changes
- - save_annotations(map uuid, map name, session id) returns error message if any
-   - saves currently published annotations as associated to the given map
-   - if current map is set, calls publish_annotations to reflect changes
+namespace yocs {
 
- NOT IMPLEMENTED, and not useful by now
- - list_maps() returns list of map metadata: {id, name, timestamp, maybe thumbnail}
-   - query for all annotations.
- - dynamic_map() returns nav_msgs/OccupancyGrid
-   - returns the dynamic map
- */
+AnnotationsManager::AnnotationsManager() : nh("")
+{
+  markers_collection = new mr::MessageCollection<ar_msgs::AlvarMarkers> ("annotations_store", "markers");
+  columns_collection = new mr::MessageCollection<yocs_msgs::ColumnList> ("annotations_store", "columns");
+  walls_collection   = new mr::MessageCollection<yocs_msgs::WallList>   ("annotations_store", "walls");
+  tables_collection  = new mr::MessageCollection<yocs_msgs::TableList>  ("annotations_store", "tables");
 
-#include <mongo_ros/message_collection.h>
-#include <ros/ros.h>
-#include <visualization_msgs/MarkerArray.h>
-#include <annotations_store/ListAnnotations.h>
-#include <annotations_store/PublishAnnotations.h>
-#include <annotations_store/DeleteAnnotations.h>
-#include <annotations_store/RenameAnnotations.h>
-#include <annotations_store/SaveAnnotations.h>
-#include <annotations_store/SaveMarkers.h>
-#include <annotations_store/SaveTables.h>
-#include <annotations_store/SaveColumns.h>
-#include <annotations_store/SaveWalls.h>
-#include <ar_track_alvar/AlvarMarkers.h>
-#include <yocs_msgs/ColumnList.h>
-#include <yocs_msgs/WallList.h>
-#include <yocs_msgs/TableList.h>
+  markers_collection -> ensureIndex("map_uuid");
+  columns_collection -> ensureIndex("map_uuid");
+  walls_collection   -> ensureIndex("map_uuid");
+  tables_collection  -> ensureIndex("map_uuid");
 
-#include <string>
-#include <sstream>
-#include <exception>
-namespace mr=mongo_ros;
-namespace ar_msgs=ar_track_alvar;
+  markers_pub = nh.advertise<ar_msgs::AlvarMarkers> ("markers_out", 1, true);
+  columns_pub = nh.advertise<yocs_msgs::ColumnList> ("columns_out", 1, true);
+  walls_pub   = nh.advertise<yocs_msgs::WallList>   ("walls_out",   1, true);
+  tables_pub  = nh.advertise<yocs_msgs::TableList>  ("tables_out",  1, true);
 
-mr::MessageCollection<ar_msgs::AlvarMarkers> *markers_collection;
-mr::MessageCollection<yocs_msgs::ColumnList> *columns_collection;
-mr::MessageCollection<yocs_msgs::WallList>   *walls_collection;
-mr::MessageCollection<yocs_msgs::TableList>  *tables_collection;
+  visuals_pub = nh.advertise<visualization_msgs::MarkerArray>  ("visual_markers", 1, true);
 
-ros::Publisher markers_pub;
-ros::Publisher tables_pub;
-ros::Publisher columns_pub;
-ros::Publisher walls_pub;
-ros::Publisher visuals_pub;
+  markers_sub = nh.subscribe("markers_in", 1, &AnnotationsManager::onMarkersReceived, this);
+  tables_sub  = nh.subscribe("tables_in",  1, &AnnotationsManager::onTablesReceived, this);
+  columns_sub = nh.subscribe("columns_in", 1, &AnnotationsManager::onColumnsReceived, this);
+  walls_sub   = nh.subscribe("walls_in",   1, &AnnotationsManager::onWallsReceived, this);
 
-std::string last_map;
-std::string pub_map_id;
+  publish_annotations_srv = nh.advertiseService("publish_annotations", &AnnotationsManager::publishAnnotations, this);
+  delete_annotations_srv  = nh.advertiseService("delete_annotations",  &AnnotationsManager::deleteAnnotations, this);
+  rename_annotations_srv  = nh.advertiseService("rename_annotations",  &AnnotationsManager::renameAnnotations, this);
+  save_annotations_srv    = nh.advertiseService("save_annotations",    &AnnotationsManager::saveAnnotations, this);
 
-visualization_msgs::MarkerArray visuals_array;
+  // Single annotation type services
+  save_markers_srv = nh.advertiseService("save_markers", &AnnotationsManager::saveMarkers, this);
+  save_tables_srv  = nh.advertiseService("save_tables",  &AnnotationsManager::saveTables, this);
+  save_columns_srv = nh.advertiseService("save_columns", &AnnotationsManager::saveColumns, this);
+  save_walls_srv   = nh.advertiseService("save_walls",   &AnnotationsManager::saveWalls, this);
 
-ar_msgs::AlvarMarkers markers_msg;
-yocs_msgs::ColumnList columns_msg;
-yocs_msgs::WallList   walls_msg;
-yocs_msgs::TableList  tables_msg;
+//  NOT IMPLEMENTED, and not useful by now
+//  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);
+//  ros::ServiceServer dynamic_annotations_srv = nh.advertiseService("dynamic_annotations", dynamicMap);
+}
 
-typedef std::vector<mr::MessageWithMetadata<ar_msgs::AlvarMarkers>::ConstPtr> MarkersVector;
-typedef std::vector<mr::MessageWithMetadata<yocs_msgs::ColumnList>::ConstPtr> ColumnsVector;
-typedef std::vector<mr::MessageWithMetadata<yocs_msgs::WallList>::ConstPtr>   WallsVector;
-typedef std::vector<mr::MessageWithMetadata<yocs_msgs::TableList>::ConstPtr>  TablesVector;
+AnnotationsManager::~AnnotationsManager() {
+  delete markers_collection;
+  delete columns_collection;
+  delete walls_collection;
+  delete tables_collection;
+}
 
-
-void onMarkersReceived(const ar_msgs::AlvarMarkers::ConstPtr& msg)
+void AnnotationsManager::onMarkersReceived(const ar_msgs::AlvarMarkers::ConstPtr& msg)
 {
   markers_msg = *msg;
 }
 
-void onColumnsReceived(const yocs_msgs::ColumnList::ConstPtr& msg)
+void AnnotationsManager::onColumnsReceived(const yocs_msgs::ColumnList::ConstPtr& msg)
 {
   columns_msg = *msg;
 }
 
-void onWallsReceived(const yocs_msgs::WallList::ConstPtr& msg)
+void AnnotationsManager::onWallsReceived(const yocs_msgs::WallList::ConstPtr& msg)
 {
   walls_msg = *msg;
 }
 
-void onTablesReceived(const yocs_msgs::TableList::ConstPtr& msg)
+void AnnotationsManager::onTablesReceived(const yocs_msgs::TableList::ConstPtr& msg)
 {
   tables_msg = *msg;
 }
 
-void clearVisuals()
+void AnnotationsManager::clearVisuals()
 {
   for (int i = 0; i < visuals_array.markers.size(); ++i)
   {
@@ -141,7 +113,7 @@ void clearVisuals()
   }
 }
 
-visualization_msgs::Marker makeVisual(const std::string& frame, const std::string& name, int id,
+visualization_msgs::Marker AnnotationsManager::makeVisual(const std::string& frame, const std::string& name, int id,
                                       int type, double length, double width, double height,
                                       const std_msgs::ColorRGBA& color, const geometry_msgs::Pose& pose)
 {
@@ -166,7 +138,7 @@ visualization_msgs::Marker makeVisual(const std::string& frame, const std::strin
   return visual;
 }
 
-visualization_msgs::Marker makeLabel(const visualization_msgs::Marker& visual)
+visualization_msgs::Marker AnnotationsManager::makeLabel(const visualization_msgs::Marker& visual)
 {
   visualization_msgs::Marker label = visual;
   label.id = visual.id + 1000000;  // visual id must be unique
@@ -179,7 +151,7 @@ visualization_msgs::Marker makeLabel(const visualization_msgs::Marker& visual)
   return label;
 }
 
-bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
+bool AnnotationsManager::publishAnnotations(annotations_store::PublishAnnotations::Request &request,
                         annotations_store::PublishAnnotations::Response &response)
 {
   ROS_INFO("Publish annotations for map '%s'", request.map_uuid.c_str());
@@ -297,7 +269,7 @@ bool publishAnnotations(annotations_store::PublishAnnotations::Request &request,
   return true;
 }
 
-bool deleteAnnotations(annotations_store::DeleteAnnotations::Request &request,
+bool AnnotationsManager::deleteAnnotations(annotations_store::DeleteAnnotations::Request &request,
 	               annotations_store::DeleteAnnotations::Response &response)
 {
 //  ros::NodeHandle nh;
@@ -345,7 +317,7 @@ bool deleteAnnotations(annotations_store::DeleteAnnotations::Request &request,
   return true;
 }
 
-bool renameAnnotations(annotations_store::RenameAnnotations::Request &request,
+bool AnnotationsManager::renameAnnotations(annotations_store::RenameAnnotations::Request &request,
                        annotations_store::RenameAnnotations::Response &response)
 {
   markers_collection -> modifyMetadata(mr::Query("map_uuid", request.map_uuid),
@@ -360,7 +332,7 @@ bool renameAnnotations(annotations_store::RenameAnnotations::Request &request,
 }
 
 
-bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
+bool AnnotationsManager::saveAnnotations(annotations_store::SaveAnnotations::Request &request,
                      annotations_store::SaveAnnotations::Response &response)
 {
 // TODO verify that the map exists; I need a version of the removed "lookMap"
@@ -411,233 +383,5 @@ bool saveAnnotations(annotations_store::SaveAnnotations::Request &request,
   }
 }
 
-bool saveMarkers(annotations_store::SaveMarkers::Request &request,
-                 annotations_store::SaveMarkers::Response &response)
-{
-  ROS_INFO("Save markers for map '%s'", request.map_uuid.c_str());
-
-  try
-  {
-    //remove from visualization tools and delete visualization markers
-    clearVisuals();
-
-    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
-                                         "map_uuid",   request.map_uuid,
-                                         "session_id", "");
-
-    markers_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
-    markers_collection->insert(request.markers, metadata);
-    response.found = true;
-
-    ROS_INFO("Markers saved: %lu markers", request.markers.markers.size());
-
-    // Check if we are modifying currently published annotations to republish them if so
-    if (pub_map_id == request.map_uuid)
-    {
-      annotations_store::PublishAnnotations::Request pubReq;
-      annotations_store::PublishAnnotations::Response pubRes;
-      pubReq.map_uuid = request.map_uuid;
-      if (publishAnnotations(pubReq, pubRes) == false)
-        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
-    }
-    return true;
-  }
-  catch (mongo::DBException& e)
-  {
-    ROS_ERROR("Error during saving: %s", e.what());
-    response.error_msg = e.what();
-    return false;
-  }
 }
 
-bool saveTables(annotations_store::SaveTables::Request &request,
-                annotations_store::SaveTables::Response &response)
-{
-  ROS_INFO("Save tables for map '%s'", request.map_uuid.c_str());
-
-  try
-  {
-    //remove from visualization tools and delete visualization tables
-    clearVisuals();
-
-    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
-                                         "map_uuid",   request.map_uuid,
-                                         "session_id", "");
-
-    tables_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
-    tables_collection->insert(request.tables, metadata);
-    response.found = true;
-
-    ROS_INFO("Tables saved: %lu tables", request.tables.tables.size());
-
-    // Check if we are modifying currently published annotations to republish them if so
-    if (pub_map_id == request.map_uuid)
-    {
-      annotations_store::PublishAnnotations::Request pubReq;
-      annotations_store::PublishAnnotations::Response pubRes;
-      pubReq.map_uuid = request.map_uuid;
-      if (publishAnnotations(pubReq, pubRes) == false)
-        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
-    }
-    return true;
-  }
-  catch (mongo::DBException& e)
-  {
-    ROS_ERROR("Error during saving: %s", e.what());
-    response.error_msg = e.what();
-    return false;
-  }
-}
-
-bool saveColumns(annotations_store::SaveColumns::Request &request,
-                 annotations_store::SaveColumns::Response &response)
-{
-  ROS_INFO("Save columns for map '%s'", request.map_uuid.c_str());
-
-  try
-  {
-    //remove from visualization tools and delete visualization columns
-    clearVisuals();
-
-    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
-                                         "map_uuid",   request.map_uuid,
-                                         "session_id", "");
-
-    columns_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
-    columns_collection->insert(request.columns, metadata);
-    response.found = true;
-
-    ROS_INFO("Columns saved: %lu columns", request.columns.obstacles.size());
-
-    // Check if we are modifying currently published annotations to republish them if so
-    if (pub_map_id == request.map_uuid)
-    {
-      annotations_store::PublishAnnotations::Request pubReq;
-      annotations_store::PublishAnnotations::Response pubRes;
-      pubReq.map_uuid = request.map_uuid;
-      if (publishAnnotations(pubReq, pubRes) == false)
-        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
-    }
-    return true;
-  }
-  catch (mongo::DBException& e)
-  {
-    ROS_ERROR("Error during saving: %s", e.what());
-    response.error_msg = e.what();
-    return false;
-  }
-}
-
-bool saveWalls(annotations_store::SaveWalls::Request &request,
-               annotations_store::SaveWalls::Response &response)
-{
-  ROS_INFO("Save walls for map '%s'", request.map_uuid.c_str());
-
-  try
-  {
-    //remove from visualization tools and delete visualization walls
-    clearVisuals();
-
-    mr::Metadata metadata = mr::Metadata("map_name",   "Created from files",
-                                         "map_uuid",   request.map_uuid,
-                                         "session_id", "");
-
-    walls_collection->removeMessages(mr::Query("map_uuid", request.map_uuid));
-    walls_collection->insert(request.walls, metadata);
-
-    ROS_INFO("Walls saved: %lu walls", request.walls.obstacles.size());
-
-    // Check if we are modifying currently published annotations to republish them if so
-    if (pub_map_id == request.map_uuid)
-    {
-      annotations_store::PublishAnnotations::Request pubReq;
-      annotations_store::PublishAnnotations::Response pubRes;
-      pubReq.map_uuid = request.map_uuid;
-      if (publishAnnotations(pubReq, pubRes) == false)
-        ROS_WARN("Republish modified annotations failed for map '%s'", request.map_uuid.c_str());
-    }
-    return true;
-  }
-  catch (mongo::DBException& e)
-  {
-    ROS_ERROR("Error during saving: %s", e.what());
-    response.error_msg = e.what();
-    return false;
-  }
-}
-
-
-int main (int argc, char** argv)
-{
-  ros::init(argc, argv, "annotations_manager");
-  ros::NodeHandle nh;
-
-  markers_collection = new mr::MessageCollection<ar_msgs::AlvarMarkers> ("annotations_store", "markers");
-  columns_collection = new mr::MessageCollection<yocs_msgs::ColumnList> ("annotations_store", "columns");
-  walls_collection   = new mr::MessageCollection<yocs_msgs::WallList>   ("annotations_store", "walls");
-  tables_collection  = new mr::MessageCollection<yocs_msgs::TableList>  ("annotations_store", "tables");
-
-  markers_collection -> ensureIndex("map_uuid");
-  columns_collection -> ensureIndex("map_uuid");
-  walls_collection   -> ensureIndex("map_uuid");
-  tables_collection  -> ensureIndex("map_uuid");
-
-//  if (!nh.getParam("last_map_id", last_map))   TODO I don't think it make sense to pub last annotations
-//  {
-//    last_map = "";
-//  }
-
-  markers_pub = nh.advertise<ar_msgs::AlvarMarkers> ("markers_out", 1, true);
-  columns_pub = nh.advertise<yocs_msgs::ColumnList> ("columns_out", 1, true);
-  walls_pub   = nh.advertise<yocs_msgs::WallList>   ("walls_out",   1, true);
-  tables_pub  = nh.advertise<yocs_msgs::TableList>  ("tables_out",  1, true);
-
-  visuals_pub = nh.advertise<visualization_msgs::MarkerArray>  ("visual_markers", 1, true);
-//  if (last_map != "")
-//  {
-//    nav_msgs::OccupancyGridConstPtr map;
-//    if (lookupMap(last_map, map))
-//    {
-//      try {
-//	map_publisher.publish(map);
-//      } catch(...) {
-//	ROS_ERROR("Error publishing map");
-//      }
-//    }
-//    else
-//    {
-//      ROS_ERROR("Invalid last_map_id");
-//    }
-//  }
-
-  ros::Subscriber markers_sub = nh.subscribe("markers_in", 1, onMarkersReceived);
-  ros::Subscriber tables_sub  = nh.subscribe("tables_in",  1, onTablesReceived);
-  ros::Subscriber columns_sub = nh.subscribe("columns_in", 1, onColumnsReceived);
-  ros::Subscriber walls_sub   = nh.subscribe("walls_in",   1, onWallsReceived);
-
-  ros::ServiceServer publish_annotations_srv = nh.advertiseService("publish_annotations", publishAnnotations);
-  ros::ServiceServer delete_annotations_srv  = nh.advertiseService("delete_annotations",  deleteAnnotations);
-  ros::ServiceServer rename_annotations_srv  = nh.advertiseService("rename_annotations",  renameAnnotations);
-  ros::ServiceServer save_annotations_srv    = nh.advertiseService("save_annotations",    saveAnnotations);
-
-  // Single annotation type services
-  ros::ServiceServer save_markers_srv = nh.advertiseService("save_markers", saveMarkers);
-  ros::ServiceServer save_tables_srv  = nh.advertiseService("save_tables",  saveTables);
-  ros::ServiceServer save_columns_srv = nh.advertiseService("save_columns", saveColumns);
-  ros::ServiceServer save_walls_srv   = nh.advertiseService("save_walls",   saveWalls);
-
-//  NOT IMPLEMENTED, and not useful by now
-//  ros::ServiceServer list_annotations_srv    = nh.advertiseService("list_annotations",    listAnnotations);
-//  ros::ServiceServer dynamic_annotations_srv = nh.advertiseService("dynamic_annotations", dynamicMap);
-
-  ROS_DEBUG("Annotations manager running");
-
-  ros::spin();
-
-  delete markers_collection;
-  delete columns_collection;
-  delete walls_collection;
-  delete tables_collection;
-
-  return 0;
-}
