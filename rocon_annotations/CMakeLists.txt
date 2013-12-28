@@ -1,5 +1,14 @@
+##############################################################################
+# CMake
+##############################################################################
+
 cmake_minimum_required(VERSION 2.8.3)
-project(annotations_store)
+project(rocon_annotations)
+
+##############################################################################
+# Dependencies
+##############################################################################
+
 
 find_package(catkin REQUIRED COMPONENTS
   nav_msgs
@@ -12,24 +21,18 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
 )
 
-add_service_files(
-  DIRECTORY srv
-  FILES
-  DeleteAnnotations.srv
-  ListAnnotations.srv
-  PublishAnnotations.srv
-  RenameAnnotations.srv
-  SaveAnnotations.srv
-  SaveMarkers.srv
-  SaveColumns.srv
-  SaveTables.srv
-  SaveWalls.srv
-)
+##############################################################################
+# Package
+##############################################################################
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES annotations_manager_lib
 )
+
+##############################################################################
+# Build
+##############################################################################
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
@@ -46,7 +49,15 @@ add_executable(annotations_manager src/annotations_manager_node.cpp)
 add_dependencies(annotations_manager annotations_manager_lib)
 target_link_libraries(annotations_manager annotations_manager_lib ${catkin_LIBRARIES})
 
+##############################################################################
+# Tests
+##############################################################################
+
 add_rostest(test/annotations_store.test)
+
+##############################################################################
+# Install
+##############################################################################
 
 install(TARGETS annotations_saver
 	            annotations_manager
