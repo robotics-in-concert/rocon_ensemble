@@ -1,0 +1,36 @@
+<package>
+  <name>annotations_store</name>
+  <version>0.1.0</version>
+  <description>
+    Storage manager for OccupancyGrid maps.  Supports naming the most
+    recent map, getting a list of map names, and publishing a
+    specific map.
+  </description>
+  <maintainer email="jihoonl@yujinrobot.com">Jihoon Lee</maintainer>
+  <author email="jorge@yujinrobot.com">Jorge Santos</author>
+  <license>BSD</license>
+
+  <url>http://ros.org/wiki/annotations_store</url>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>rosconsole</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>rostest</build_depend>
+  <build_depend>warehouse_ros</build_depend>
+  <build_depend>ar_track_alvar</build_depend>
+  <build_depend>yocs_msgs</build_depend>
+  <build_depend>visualization_msgs</build_depend>
+
+  <run_depend>message_runtime</run_depend>
+  <run_depend>nav_msgs</run_depend>
+  <run_depend>rosconsole</run_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>rospy</run_depend>
+  <run_depend>warehouse_ros</run_depend>
+  <run_depend>ar_track_alvar</run_depend>
+  <run_depend>yocs_msgs</run_depend>
+  <run_depend>visualization_msgs</run_depend>
+</package>
+
