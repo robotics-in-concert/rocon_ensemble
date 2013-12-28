@@ -1,16 +1,18 @@
 <package>
-  <name>annotations_store</name>
+  <name>rocon_annotations</name>
   <version>0.1.0</version>
   <description>
     Storage manager for OccupancyGrid maps.  Supports naming the most
     recent map, getting a list of map names, and publishing a
     specific map.
   </description>
-  <maintainer email="jihoonl@yujinrobot.com">Jihoon Lee</maintainer>
-  <author email="jorge@yujinrobot.com">Jorge Santos</author>
   <license>BSD</license>
 
-  <url>http://ros.org/wiki/annotations_store</url>
+  <url>http://ros.org/wiki/rocon_annotations</url>
+
+  <maintainer email="jihoonl@yujinrobot.com">Jihoon Lee</maintainer>
+  <author>Jorge Santos</author>
+
 
   <buildtool_depend>catkin</buildtool_depend>
 
@@ -23,7 +25,6 @@
   <build_depend>yocs_msgs</build_depend>
   <build_depend>visualization_msgs</build_depend>
 
-  <run_depend>message_runtime</run_depend>
   <run_depend>nav_msgs</run_depend>
   <run_depend>rosconsole</run_depend>
   <run_depend>roscpp</run_depend>
